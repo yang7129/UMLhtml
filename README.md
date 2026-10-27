@@ -1,6 +1,7 @@
 It's just a personal project. 
 
 2026/10/27========================================
+
 V2
 Default EN-US
 Add Language
