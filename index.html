@@ -1982,7 +1982,19 @@
     
     * ------------------------------------------------------------- */
 
-    const LANE_BAND = 34;    // 泳道標題帶寬度
+    const LANE_BAND = 34;    // 直向泳道標題帶高度（預設值，每個節點可用 band 覆蓋）
+
+    const LANE_BAND_H = 90;  // 橫向泳道標題帶寬度（文字橫寫，要比直向寬）
+
+    const LANE_BAND_MIN = 24;
+
+    /** 泳道標題帶的實際厚度：橫向是寬、直向是高；夾在泳道範圍內，至少留 20px 給內容 */
+
+    function bandSize(n) {
+
+      const H = n.type === "laneH", full = H ? n.w : n.h;
+      return Math.min(Math.max(n.band || (H ? LANE_BAND_H : LANE_BAND), LANE_BAND_MIN), Math.max(LANE_BAND_MIN, full - 20));
+    }
 
     const LIFE_HEAD = 46;    // 時序圖生命線頭部高度
 
@@ -4436,7 +4448,7 @@
 
           g.appendChild(el("rect", { class: "lane-body", x: 0, y: 0, width: w, height: h }));
 
-          g.appendChild(el("rect", { class: "lane-band", x: 0, y: 0, width: Math.min(LANE_BAND, w), height: h }));
+          g.appendChild(el("rect", { class: "lane-band", x: 0, y: 0, width: bandSize(n), height: h }));
 
           return g;
 
@@ -4447,7 +4459,7 @@
 
           g.appendChild(el("rect", { class: "lane-body", x: 0, y: 0, width: w, height: h }));
 
-          g.appendChild(el("rect", { class: "lane-band", x: 0, y: 0, width: w, height: Math.min(LANE_BAND, h) }));
+          g.appendChild(el("rect", { class: "lane-band", x: 0, y: 0, width: w, height: bandSize(n) }));
 
           return g;
 
@@ -4569,8 +4581,8 @@
       const s = SHAPES[n.type] || {};
       if (s.hollow) {
 
-        const band = n.type === "laneH" ? { x: 0, y: 0, width: Math.min(LANE_BAND, n.w), height: n.h }
-          : n.type === "laneV" ? { x: 0, y: 0, width: n.w, height: Math.min(LANE_BAND, n.h) }
+        const band = n.type === "laneH" ? { x: 0, y: 0, width: bandSize(n), height: n.h }
+          : n.type === "laneV" ? { x: 0, y: 0, width: n.w, height: bandSize(n) }
             : (() => { const { tw, th } = tagSize(n); return { x: 0, y: 0, width: tw, height: th }; })();
 
         return [
@@ -4607,8 +4619,8 @@
       switch (s.labelAt) {
 
         case "below": return { x: n.w / 2 - 100, y: n.h + 6, w: 200, h: 24, lines: 6 };
-        case "laneH": return { x: 0, y: 0, w: LANE_BAND, h: n.h, rotate: true, wrap: n.h - 16 };
-        case "laneV": return { x: 0, y: 0, w: n.w, h: LANE_BAND, wrap: n.w - 16 };
+        case "laneH": return { x: 0, y: 0, w: bandSize(n), h: n.h, wrap: Math.max(16, bandSize(n) - 12) };
+        case "laneV": return { x: 0, y: 0, w: n.w, h: bandSize(n), wrap: n.w - 16 };
         case "head": return { x: (n.w - LIFE_W) / 2, y: 0, w: LIFE_W, h: LIFE_HEAD, wrap: LIFE_W - 16 };
         case "tag": {
 
@@ -4785,10 +4797,6 @@
           t.appendChild(ts);
 
         });
-
-        // 橫向泳道的標題帶很窄，文字轉 90 度才放得下
-
-        if (lb.rotate) t.setAttribute("transform", `rotate(-90 ${cx} ${cy})`);
 
         g.appendChild(t);
 
@@ -5323,6 +5331,19 @@
         }));
 
       }
+      // 泳道標題帶：在標題帶的內緣中點給一個控制點，拖曳調整厚度
+
+      if (n.type === "laneH" || n.type === "laneV") {
+
+        const b = bandSize(n), H = n.type === "laneH";
+
+        gOver.appendChild(el("rect", {
+          class: "handle tag", "data-h": "band", "data-node": n.id,
+          x: (H ? n.x + b : n.x + n.w / 2) - 4, y: (H ? n.y + n.h / 2 : n.y + b) - 4,
+          width: 8, height: 8, rx: 2, style: "cursor:" + (H ? "ew-resize" : "ns-resize")
+        }));
+
+      }
     }
     /* ---------------------------------------------------------------
     
@@ -5499,7 +5520,7 @@
           id: n.id, type: n.type, x: n.x, y: n.y, w: n.w, h: n.h,
           text: n.text || "",
           ...opt(n, ["src", "fill", "stroke", "txt", "filled", "line", "noTag",
-            "tagW", "tagH", "link", "group", "key"])
+            "tagW", "tagH", "band", "link", "group", "key"])
         })),
         edges: state.edges.map(e => ({
           id: e.id, from: endCopy(e.from), to: endCopy(e.to), mode: e.mode,
@@ -7249,6 +7270,24 @@
           body.appendChild(ftip);
 
         }
+        // 泳道標題帶厚度：橫向、直向分開調（一個是寬、一個是高）
+
+        for (const [type, key, max] of [["laneH", "f.bandW", 400], ["laneV", "f.bandH", 200]]) {
+
+          const lanes = nodes.filter(n => n.type === type);
+
+          if (!lanes.length) continue;
+
+          body.appendChild(field(T(key), slider("band-" + type, LANE_BAND_MIN, max, 2,
+            bandSize(lanes[0]), " px", (v, done) => {
+
+              lanes.forEach(n => { n.band = v; n.band = bandSize(n); drawNode(n); });
+
+              if (done) commit(); else drawHandles();
+
+            })));
+
+        }
         const reset = document.createElement("button");
 
         reset.className = "btn-line"; reset.textContent = T("node.reset");
@@ -7258,7 +7297,7 @@
 
           delete n.filled; delete n.line; delete n.noTag;
 
-          delete n.tagW; delete n.tagH;
+          delete n.tagW; delete n.tagH; delete n.band;
         });
 
         body.appendChild(reset);
@@ -7850,6 +7889,12 @@
           return;
 
         }
+        if (t.dataset.h === "band") {
+
+          drag = { kind: "bandsize", n, o: { band: n.band, b: bandSize(n) }, start: pt };
+          return;
+
+        }
         drag = { kind: "resize", h: t.dataset.h, n, o: { x: n.x, y: n.y, w: n.w, h: n.h }, start: pt };
         return;
 
@@ -8128,6 +8173,21 @@
         return;
 
       }
+      if (drag.kind === "bandsize") {
+
+        const n = drag.n, H = n.type === "laneH", q = v => Math.round(v / 2) * 2;
+
+        n.band = q(drag.o.b + (H ? pt.x - drag.start.x : pt.y - drag.start.y));
+
+        n.band = bandSize(n);   // 夾在合理範圍內
+
+        drag.moved = true;
+
+        drawNode(n); drawHandles();
+
+        return;
+
+      }
       if (drag.kind === "seg") {
 
         // 只沿著垂直於這段的方向平移，兩個端點一起走，形狀才不會走鐘
@@ -8345,7 +8405,7 @@
 
       }
       if (d.kind === "resize") { reroute([d.n.id], false); commit(); return; }
-      if (d.kind === "tagsize") { if (d.moved) commit(); return; }
+      if (d.kind === "tagsize" || d.kind === "bandsize") { if (d.moved) commit(); return; }
       if (d.kind === "wp") { const p = routeEdge(d.e, false); if (p) { d.e._pts = p; updateEdgeGeom(d.e); } commit(); return; }
       if (d.kind === "seg") {
 
@@ -8503,7 +8563,7 @@
 
         const s = toScreen(obj.x + lb.x, obj.y + lb.y);
 
-        w = Math.max(70, Math.min(260, (lb.rotate ? lb.h : lb.w) * state.scale));
+        w = Math.max(70, Math.min(260, lb.w * state.scale));
 
         sx = s.x - vp.left + (lb.w * state.scale) / 2 - w / 2;
 
@@ -8815,6 +8875,14 @@
           if (d.o.tagW === undefined) delete d.n.tagW; else d.n.tagW = d.o.tagW;
 
           if (d.o.tagH === undefined) delete d.n.tagH; else d.n.tagH = d.o.tagH;
+
+          drawNode(d.n); drawHandles();
+
+          break;
+
+        case "bandsize":
+
+          if (d.o.band === undefined) delete d.n.band; else d.n.band = d.o.band;
 
           drawNode(d.n); drawHandles();
 
@@ -11264,14 +11332,14 @@ ${bodySVG}
           { id: "L1", type: "laneH", x: 0, y: 0, w: 1060, h: 150, text: T("tx.customer") },
           { id: "L2", type: "laneH", x: 0, y: 150, w: 1060, h: 150, text: T("tx.service") },
           { id: "L3", type: "laneH", x: 0, y: 300, w: 1060, h: 150, text: T("tx.system") },
-          { id: "s", type: "start", x: 70, y: 52, text: "" },
-          { id: "a1", type: "action", x: 150, y: 45, text: T("tx.apply") },
-          { id: "a2", type: "action", x: 150, y: 195, text: T("tx.accept") },
-          { id: "d", type: "decision", x: 360, y: 190, w: 140, h: 70, text: T("tx.complete") },
-          { id: "a3", type: "action", x: 360, y: 45, text: T("tx.askMore") },
-          { id: "a4", type: "action", x: 570, y: 345, text: T("tx.ticket") },
-          { id: "a5", type: "action", x: 790, y: 195, text: T("tx.notify") },
-          { id: "e", type: "end", x: 900, y: 52, text: "" },
+          { id: "s", type: "start", x: 110, y: 52, text: "" },
+          { id: "a1", type: "action", x: 190, y: 45, text: T("tx.apply") },
+          { id: "a2", type: "action", x: 190, y: 195, text: T("tx.accept") },
+          { id: "d", type: "decision", x: 400, y: 190, w: 140, h: 70, text: T("tx.complete") },
+          { id: "a3", type: "action", x: 400, y: 45, text: T("tx.askMore") },
+          { id: "a4", type: "action", x: 610, y: 345, text: T("tx.ticket") },
+          { id: "a5", type: "action", x: 830, y: 195, text: T("tx.notify") },
+          { id: "e", type: "end", x: 940, y: 52, text: "" },
         ], [
 
           { from: { n: "s" }, to: { n: "a1" } },
@@ -12177,6 +12245,8 @@ ${bodySVG}
         "f.tag": "Title tag",
         "f.tagW": "Tag width",
         "f.tagH": "Tag height",
+        "f.bandW": "Title band width",
+        "f.bandH": "Title band height",
         "opt.transparent": "Transparent",
         "opt.filled": "Filled",
         "opt.dashed": "Dashed",
@@ -12587,6 +12657,8 @@ ${bodySVG}
         "f.tag": "標題標籤",
         "f.tagW": "標籤寬度",
         "f.tagH": "標籤高度",
+        "f.bandW": "標題帶寬度",
+        "f.bandH": "標題帶高度",
         "opt.transparent": "透明",
         "opt.filled": "填滿",
         "opt.dashed": "虛線",
